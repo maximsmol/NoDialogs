@@ -5,8 +5,7 @@ Replace sluggish system file dialogs with a blazingly fast versatile input box.
 Mac's system file dialogs open slowly (hanging ST while doing so) and are over-complicated.
 
 # Installation
-Not yet available
-~Use [Package Control](https://packagecontrol.io)~
+Use [Package Control](https://packagecontrol.io/packages/NoDialogs)
 
 # Default key bindings
 This plugins will by default overwrite following key bindings:
