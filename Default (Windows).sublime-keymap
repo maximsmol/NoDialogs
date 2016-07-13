@@ -1,0 +1,26 @@
+[
+	{
+		"keys": ["ctrl+o"],
+		"command": "no_dialogs_create_open_prompt"
+	},
+	{
+		"keys": ["ctrl+s"],
+		"command": "no_dialogs_create_save_prompt"
+	},
+	{
+		"keys": ["ctrl+shift+s"],
+		"command": "no_dialogs_create_copy_prompt"
+	},
+	{
+		"keys": ["ctrl+alt+s"],
+		"command": "no_dialogs_create_move_prompt"
+	},
+	{
+		"keys": ["ctrl+alt+d"],
+		"command": "no_dialogs_create_delete_prompt"
+	},
+	{
+		"keys": ["ctrl+w"],
+		"command": "no_dialogs_create_close_prompt"
+	}
+]
