@@ -10,7 +10,7 @@ Use [Package Control](https://packagecontrol.io/packages/NoDialogs)
 # Default key bindings
 This plugins will by default overwrite following key bindings:
 
-Key bindings  | Windows version | Description
+Key binding   | Windows version | Description
 ------------- | --------------- | -----------
 super+o       | ctrl+o          | Open file
 super+s       | ctrl+s          | Save file
