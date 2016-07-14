@@ -92,8 +92,8 @@ class NoDialogsHelperReplaceCommand(sublime_plugin.TextCommand):
 	def run(self, edit, content):
 		self.view.replace(edit, sublime.Region(0, self.view.size()), content)
 
-class SublimeDialog(sublime_plugin.TextCommand):
-	def __init__(self, view):
+class SublimeDialog(sublime_plugin.WindowCommand):
+	def __init__(self, win):
 		self.accept_modifications = False
 		self.oldText = ""
 
@@ -103,10 +103,13 @@ class SublimeDialog(sublime_plugin.TextCommand):
 		self.completionIndex = 0
 		self.completionCount = 0
 
-		sublime_plugin.TextCommand.__init__(self, view)
+		self.window = win
+		self.view = self.view()
+
+		sublime_plugin.WindowCommand.__init__(self, win)
 
 	def defaultDir(self):
-		folders = self.window().folders()
+		folders = self.window.folders()
 		if folders:
 			return os.path.join(folders[0], "")
 		else:
@@ -118,8 +121,8 @@ class SublimeDialog(sublime_plugin.TextCommand):
 		else:
 			return os.path.join(self.defaultDir(), self.view.name())
 
-	def window(self):
-		return sublime.active_window()
+	def view(self):
+		return self.window.active_view()
 
 	def completion_setupInput(self):
 		self.input.settings().set("auto_complete_commit_on_tab", False)
@@ -181,10 +184,10 @@ class NoDialogsCreateOpenPromptCommand(SublimeDialog):
 		SublimeDialog.__init__(self, view)
 
 	def on_open_inputEnd(self, path):
-		self.window().open_file(path)
+		self.window.open_file(path)
 
-	def run(self, edit):
-		self.input = self.window().show_input_panel("Open:", self.defaultDir(), self.on_open_inputEnd, self.on_modified, None)
+	def run(self):
+		self.input = self.window.show_input_panel("Open:", self.defaultDir(), self.on_open_inputEnd, self.on_modified, None)
 
 		sel = self.input.sel()
 		sel.clear()
@@ -253,7 +256,7 @@ class Send2TrashThread(threading.Thread):
 class NoDialogsCreateGenericSavePrompt(SublimeDialog):
 	def saveAs(self, path):
 		self.beforeSaveHook(path)
-		SaveAsThread(self.view, self.window(), path, functools.partial(self.afterSaveHook, path)).start()
+		SaveAsThread(self.view, self.window, path, functools.partial(self.afterSaveHook, path)).start()
 
 	def overwrite_ifAnswerPositive(self, path, ans):
 		if (not ans) or ("NnFf".find(ans[0]) == -1):
@@ -264,7 +267,7 @@ class NoDialogsCreateGenericSavePrompt(SublimeDialog):
 			message = "untitled"
 			placeholder = os.path.join(self.defaultDir(), message)
 
-			self.input = self.window().show_input_panel("Save:", placeholder, self.on_saveTo_inputEnd, self.on_modified, None)
+			self.input = self.window.show_input_panel("Save:", placeholder, self.on_saveTo_inputEnd, self.on_modified, None)
 			view_select_allBut_reverse(self.input, message)
 
 			self.completion_setupInput()
@@ -274,11 +277,11 @@ class NoDialogsCreateGenericSavePrompt(SublimeDialog):
 				query = "Overwrite? (Y/y T/t N/n F/f) (defaults to YES):"
 				onDone = functools.partial(self.overwrite_ifAnswerPositive, inputPath)
 
-				self.window().show_input_panel(query, "", onDone, None, None)
+				self.window.show_input_panel(query, "", onDone, None, None)
 			else:
 				self.saveAs(inputPath)
 
-	def run(self, edit):
+	def run(self):
 		return
 
 	def beforeSaveHook(self, path):
@@ -293,12 +296,12 @@ class NoDialogsCreateSavePromptCommand(NoDialogsCreateGenericSavePrompt):
 
 		MkdripSaveThread(self.view, path, functools.partial(self.view.erase_status, "NoDialogs_resave")).start()
 
-	def run(self, edit):
+	def run(self):
 		curPath = self.view.file_name()
 		if curPath:
 			self.resave(curPath)
 		else:
-			self.input = self.window().show_input_panel("Save:", self.defaultFile(), self.on_saveTo_inputEnd, self.on_modified, None)
+			self.input = self.window.show_input_panel("Save:", self.defaultFile(), self.on_saveTo_inputEnd, self.on_modified, None)
 			view_putCursor_at_end(self.input)
 
 			self.completion_setupInput()
@@ -311,8 +314,8 @@ class NoDialogsCreateSavePromptCommand(NoDialogsCreateGenericSavePrompt):
 		self.view.erase_status("NoDialogs_save")
 
 class NoDialogsCreateCopyPromptCommand(NoDialogsCreateGenericSavePrompt):
-	def run(self, edit):
-		self.input = self.window().show_input_panel("Copy:", self.defaultFile(), self.on_saveTo_inputEnd, self.on_modified, None)
+	def run(self):
+		self.input = self.window.show_input_panel("Copy:", self.defaultFile(), self.on_saveTo_inputEnd, self.on_modified, None)
 		view_select_allBut_reverse(self.input, os.path.basename(self.defaultFile()))
 
 		self.completion_setupInput()
@@ -326,11 +329,11 @@ class NoDialogsCreateCopyPromptCommand(NoDialogsCreateGenericSavePrompt):
 		# Send2TrashThread(path, functools.partial(self.view.erase_status, "NoDialogs_copy")).start()
 
 class NoDialogsCreateMovePromptCommand(NoDialogsCreateGenericSavePrompt):
-	def run(self, edit):
+	def run(self):
 		curPath = self.defaultFile()
 		self.oldPath = curPath
 
-		self.input = self.window().show_input_panel("Move:", curPath, self.on_saveTo_inputEnd, self.on_modified, None)
+		self.input = self.window.show_input_panel("Move:", curPath, self.on_saveTo_inputEnd, self.on_modified, None)
 		view_select_allBut_reverse(self.input, os.path.basename(curPath))
 
 		self.completion_setupInput()
@@ -354,7 +357,7 @@ class NoDialogsCreateDeletePromptCommand(SublimeDialog):
 
 		forceCloseView(self.view)
 
-	def run(self, edit):
+	def run(self):
 		curPath = self.view.file_name()
 		if curPath and os.path.exists(curPath):
 			def callback():
@@ -366,7 +369,7 @@ class NoDialogsCreateDeletePromptCommand(SublimeDialog):
 			self.view.set_status("NoDialogs_delete", "Deleting: "+os.path.basename(curPath))
 			Send2TrashThread(curPath, callback).start()
 		else:
-			self.window().show_input_panel("Discard? (Y/y T/t N/n F/f) (defaults to NO):", "", functools.partial(self.closeView_ifAnswerPositive), None, None)
+			self.window.show_input_panel("Discard? (Y/y T/t N/n F/f) (defaults to NO):", "", functools.partial(self.closeView_ifAnswerPositive), None, None)
 
 
 #
@@ -378,9 +381,9 @@ class NoDialogsCreateClosePromptCommand(SublimeDialog):
 		if (not ans) or ("YyTt".find(ans[0]) == -1):
 			forceCloseView(self.view)
 
-	def run(self, edit):
+	def run(self):
 		if self.view.is_dirty():
-			self.window().show_input_panel("Discard? (Y/y T/t N/n F/f) (defaults to YES):", "", functools.partial(self.closeView_ifAnswerPositive), None, None)
+			self.window.show_input_panel("Discard? (Y/y T/t N/n F/f) (defaults to YES):", "", functools.partial(self.closeView_ifAnswerPositive), None, None)
 		else:
-			self.window().run_command('close')
+			self.window.run_command('close')
 
