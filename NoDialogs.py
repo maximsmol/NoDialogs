@@ -103,8 +103,8 @@ class SublimeDialog(sublime_plugin.WindowCommand):
 		self.completionIndex = 0
 		self.completionCount = 0
 
+		self.view = None
 		self.window = win
-		self.view = self.view()
 
 		sublime_plugin.WindowCommand.__init__(self, win)
 
@@ -120,9 +120,6 @@ class SublimeDialog(sublime_plugin.WindowCommand):
 			return self.view.file_name()
 		else:
 			return os.path.join(self.defaultDir(), self.view.name())
-
-	def view(self):
-		return self.window.active_view()
 
 	def completion_setupInput(self):
 		self.input.settings().set("auto_complete_commit_on_tab", False)
@@ -141,7 +138,7 @@ class SublimeDialog(sublime_plugin.WindowCommand):
 		newContent = os.path.join(base, completion)
 		self.oldText = newContent
 
-		self.input.run_command('sublime_dialogs_helper_replace', {'content': newContent})
+		self.input.run_command('no_dialogs_helper_replace', {'content': newContent})
 
 
 	def on_modified(self, text):
@@ -169,7 +166,7 @@ class SublimeDialog(sublime_plugin.WindowCommand):
 				self.completing = False
 				self.oldText = ''
 
-				self.input.run_command('open_prompt_replace', {'content': path})
+				self.completion_setContent(path)
 		elif self.oldText != text:
 			self.completing = False
 			self.oldText = ''
@@ -187,6 +184,8 @@ class NoDialogsCreateOpenPromptCommand(SublimeDialog):
 		self.window.open_file(path)
 
 	def run(self):
+		self.view = self.window.active_view()
+
 		self.input = self.window.show_input_panel("Open:", self.defaultDir(), self.on_open_inputEnd, self.on_modified, None)
 
 		sel = self.input.sel()
@@ -297,6 +296,8 @@ class NoDialogsCreateSavePromptCommand(NoDialogsCreateGenericSavePrompt):
 		MkdripSaveThread(self.view, path, functools.partial(self.view.erase_status, "NoDialogs_resave")).start()
 
 	def run(self):
+		self.view = self.window.active_view()
+
 		curPath = self.view.file_name()
 		if curPath:
 			self.resave(curPath)
@@ -315,6 +316,8 @@ class NoDialogsCreateSavePromptCommand(NoDialogsCreateGenericSavePrompt):
 
 class NoDialogsCreateCopyPromptCommand(NoDialogsCreateGenericSavePrompt):
 	def run(self):
+		self.view = self.window.active_view()
+
 		self.input = self.window.show_input_panel("Copy:", self.defaultFile(), self.on_saveTo_inputEnd, self.on_modified, None)
 		view_select_allBut_reverse(self.input, os.path.basename(self.defaultFile()))
 
@@ -330,6 +333,8 @@ class NoDialogsCreateCopyPromptCommand(NoDialogsCreateGenericSavePrompt):
 
 class NoDialogsCreateMovePromptCommand(NoDialogsCreateGenericSavePrompt):
 	def run(self):
+		self.view = self.window.active_view()
+
 		curPath = self.defaultFile()
 		self.oldPath = curPath
 
@@ -358,6 +363,8 @@ class NoDialogsCreateDeletePromptCommand(SublimeDialog):
 		forceCloseView(self.view)
 
 	def run(self):
+		self.view = self.window.active_view()
+
 		curPath = self.view.file_name()
 		if curPath and os.path.exists(curPath):
 			def callback():
@@ -382,7 +389,9 @@ class NoDialogsCreateClosePromptCommand(SublimeDialog):
 			forceCloseView(self.view)
 
 	def run(self):
-		if self.view.is_dirty():
+		self.view = self.window.active_view()
+
+		if self.view.file_name() and not os.path.exists(self.view.file_name()) or self.view.is_dirty():
 			self.window.show_input_panel("Discard? (Y/y T/t N/n F/f) (defaults to YES):", "", functools.partial(self.closeView_ifAnswerPositive), None, None)
 		else:
 			self.window.run_command('close')
