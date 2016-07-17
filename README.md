@@ -19,3 +19,6 @@ super+alt+s   | ctrl+alt+s      | Move file
 super+alt+d   | ctrl+alt+d      | Delete file
 super+w       | ctrl+w          | Close tab
 super+shift+w | ctrl+shift+w    | Close window
+
+# Autocomplete
+For all the dialogs involving pathes (Open file, Save file, Save a copy, Move file), there is an autocomplete feature. It is triggered by inserting a tab character into the text field (pressing `tab`).
