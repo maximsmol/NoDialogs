@@ -166,7 +166,8 @@ class SublimeDialog(sublime_plugin.WindowCommand):
 				self.completing = False
 				self.oldText = ''
 
-				self.completion_setContent(path)
+				# Can't use completion_setContent as there is not completion
+				self.input.run_command('no_dialogs_helper_replace', {'content': path})
 		elif self.oldText != text:
 			self.completing = False
 			self.oldText = ''
@@ -390,6 +391,9 @@ class NoDialogsCreateClosePromptCommand(SublimeDialog):
 
 	def run(self):
 		self.view = self.window.active_view()
+
+		if not self.view:
+			return self.window.run_command('close')
 
 		if self.view.file_name() and not os.path.exists(self.view.file_name()) or self.view.is_dirty():
 			self.window.show_input_panel("Discard? (Y/y T/t N/n F/f) (defaults to YES):", "", functools.partial(self.closeView_ifAnswerPositive), None, None)
