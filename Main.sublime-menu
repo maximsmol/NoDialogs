@@ -19,6 +19,13 @@
 								},
 								"caption": "README"
 							},
+							{
+								"command": "open_file",
+								"args": {
+									"file": "${packages}/NoDialogs/UNLICENSE.txt"
+								},
+								"caption": "UNLICENSE"
+							},
 							{"caption": "-"},
 							{
 								"command": "edit_settings",
@@ -32,6 +39,14 @@
 								"command": "edit_settings",
 								"args": {
 									"base_file": "${packages}/NoDialogs/Default ($platform).sublime-keymap",
+									"default": "[\n\t$0\n]\n"
+								},
+								"caption": "Key Bindings - Platform Specific"
+							},
+							{
+								"command": "edit_settings",
+								"args": {
+									"base_file": "${packages}/NoDialogs/Default.sublime-keymap",
 									"default": "[\n\t$0\n]\n"
 								},
 								"caption": "Key Bindings"

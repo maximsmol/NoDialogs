@@ -22,5 +22,13 @@
 	{
 		"keys": ["ctrl+w"],
 		"command": "no_dialogs_create_close_prompt"
+	},
+	{
+		"keys": ["ctrl+shift+w"],
+		"command": "no_dialogs_create_close_window_prompt"
+	},
+	{
+		"keys": ["ctrl+q"],
+		"command": "no_dialogs_create_exit_prompt"
 	}
 ]
