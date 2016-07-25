@@ -1,0 +1,44 @@
+[
+	{
+		"keys": ["tab"],
+		"command": "no_dialogs_tab_trigger",
+		"context": [
+			{"key": "panel", "operand": "input"},
+			{"key": "panel_has_focus"},
+			{"key": "no_dialogs_prompt_open"},
+			{"key": "no_dialogs_no_shell_like_autocomplete"}
+		]
+	},
+	{
+		"keys": ["right"],
+		"command": "no_dialogs_autocomplete_next",
+		"context": [
+			{"key": "panel", "operand": "input"},
+			{"key": "panel_has_focus"},
+			{"key": "no_dialogs_prompt_open"},
+			{"key": "no_dialogs_no_shell_like_autocomplete"},
+			{"key": "no_dialogs_right_arrow_override"}
+		]
+	},
+	// - - -
+	{
+		"keys": ["up"],
+		"command": "no_dialogs_history_previous",
+		"context": [
+			{"key": "panel", "operand": "input"},
+			{"key": "panel_has_focus"},
+			{"key": "no_dialogs_prompt_open"},
+			{"key": "no_dialogs_allow_history"}
+		]
+	},
+	{
+		"keys": ["down"],
+		"command": "no_dialogs_history_next",
+		"context": [
+			{"key": "panel", "operand": "input"},
+			{"key": "panel_has_focus"},
+			{"key": "no_dialogs_prompt_open"},
+			{"key": "no_dialogs_allow_history"}
+		]
+	}
+]

@@ -1,3 +1,129 @@
 {
-	
+	//
+	// Default behaviour
+	//
+
+	// Should filename default to untitled
+	"no_dialogs_use_untitled_files": false,
+
+	// The filename used for untitled files
+	"no_dialogs_untitled_file_name": "untitled",
+
+	// Should existing files be overwritten by default
+	// Nn - no; anything else - yes
+	"no_dialogs_overwrite_by_default": "y",
+
+	// Should dirty views be discarded on close by default
+	// Nn - no; anything else - yes
+	"no_dialogs_discard_by_default": "y",
+
+	// Should dirty views be discarded on window close by default
+	// Nn - no; anything else - yes
+	"no_dialogs_discard_in_window_by_default": "y",
+
+	// Should dirty views be discarded on exit by default
+	// Nn - no; anything else - yes
+	"no_dialogs_discard_on_exit_by_default": "y",
+
+
+	//
+	// Delete dialog
+	//
+
+	// Should views be deleted by default
+	// Nn - no; anything else - yes
+	"no_dialogs_delete_by_default": "y",
+
+	// Should a confirmation prompt be shown on deletion
+	//
+	// !ATTENTION! probably should not be used with 'no_dialogs_close_on_deletion'
+	// as in that case the file can be lost (moved to trash) by a single keystroke
+	"no_dialogs_delete_without_prompt": true,
+
+	// Should the deleted file be automatically closed
+	//
+	// !ATTENTION! probably should not be used with 'no_dialogs_delete_without_prompt'
+	// as in that case the file can be lost (moved to trash) by a single keystroke
+	"no_dialogs_close_on_deletion": false,
+
+
+	//
+	// History
+	//
+
+	// Should last used paths be remembered for every no-dialog prompt
+	"no_dialogs_allow_history": true,
+
+	// Where exactly whould history be allowed
+	// !ATTENTION! does not override plugin-wide setting
+	"no_dialogs_allow_history_in": ["save", "copy", "move"],
+
+	// Should history be stored plugin-wide
+	// If set to false, each command has it's own history
+	"no_dialogs_use_global_history": true,
+
+	// Should history cycle
+	"no_dialogs_cycle_history": false,
+
+
+	//
+	// Autocomplete
+	// !ATTENTION!
+	// Autocomplete settings only apply to input panels created by NoDialogs
+	//
+
+	// Should shell-like autocomplete be used
+	// aka complete to largest common prefix
+	// Example:
+	// |                Files                |  Query  | Resulting completions
+	// | ['.DS_Store', '.git', '.gitignore'] | '.'     | '.'
+	// | ['.DS_Store', '.git', '.gitignore'] | '.g'    | '.git'
+	// | ['.DS_Store', '.git', '.gitignore'] | '.giti' | '.gitignore'
+	//
+	// If set to false returns all completions starting with entered string
+	// Example:
+	// |                Files                |  Query  | Resulting completions
+	// | ['.DS_Store', '.git', '.gitignore'] | '.'     | ['.DS_Store', '.git', '.gitignore']
+	// | ['.DS_Store', '.git', '.gitignore'] | '.g'    | ['.git', '.gitignore']
+	// | ['.DS_Store', '.git', '.gitignore'] | '.giti' | '.gitignore'
+	//
+	// !ATTENTION!
+	// Default autocomplete works best with this set to false (see 'no_dialogs_autocomplete_mode')
+	"no_dialogs_use_shell_like_autocomplete": false,
+
+	// What priority should folders get in autocomplete
+	// Possible values:
+	// first - folders on top
+	// last  - folders on the bottom
+	// none  - folders do not get special treatment (sorted by name as with files)
+	"no_dialogs_folder_priority": "first",
+
+	// What autocomplete system to use
+	// Possible values:
+	// default     - use ST's default autocomplete popup
+	// tab_trigger - autocomplete on detecting tab character (	)
+	//
+	// !ATTENTION!
+	// Default autocomplete mode works best with
+	// non-shell-like autocomplete (see 'no_dialogs_use_shell_like_autocomplete')
+	"no_dialogs_autocomplete_mode": "tab_trigger",
+
+	// Should default word-completions be removed from autocomplete
+	// Used ONLY if 'no_dialogs_autocomplete_mode' is 'default'
+	"no_dialogs_inhibit_word_completions": true,
+
+	// Should completions from '.sublime-completions' files be removed from autocomplete
+	// Used ONLY if 'no_dialogs_autocomplete_mode' is 'default'
+	"no_dialogs_inhibit_explicit_completions": true,
+
+	// Should right arrow move on in autocompletion
+	"no_dialogs_right_arrow_override": true,
+
+	// If right arrow is used for moving on in autocompletion
+	// this command is also executed
+	"no_dialogs_right_arrow_default_command": "move",
+	"no_dialogs_right_arrow_default_args": {
+		"by": "characters",
+		"forward": true
+	}
 }

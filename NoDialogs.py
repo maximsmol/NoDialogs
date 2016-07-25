@@ -1,402 +1,852 @@
 import sublime, sublime_plugin
 import os
-import functools
-import threading
+import errno
 
-VERSION = int(sublime.version())
-HOMEDIR = os.path.join(os.path.expanduser("~"), "")
+if int(sublime.version()) < 3000:
+	from send2trash import send2trash # ST2
+else:
+	from .send2trash import send2trash # ST3
 
-def getParent(path):
-	if path.endswith(os.sep):
-		return os.path.dirname(os.path.dirname(path))
-	else:
-		return os.path.dirname(path)
-
-def getPrefixRank(prefix, str):
-	rank = 0
-
-	for a, b in zip(prefix, str):
-		if a != b:
-			return rank
+#
+# Helpers
+#
+def mkdirp(path):
+	try:
+		os.makedirs(os.path.dirname(path))
+	except OSError as e:
+		if not e.errno == errno.EEXIST:
+			raise
 		else:
-			rank += 1
+			pass
 
-	return rank
+def ensure_path_sep_at_end(path):
+	return os.path.join(path, '')
 
-def getRawCompletions(path):
-	dirname = os.path.dirname(path)
-	basename = os.path.basename(path)
+def ensure_path_sep_at_end_of_folders(path):
+	if os.path.isdir(path):
+		return ensure_path_sep_at_end(path)
+	else:
+		return path
 
-	if os.path.exists(dirname):
-		files = os.listdir(dirname)
+def can_resave(view):
+	return view.file_name() is not None
+
+def all_region(view):
+	return sublime.Region(0, view.size())
+
+def read_view(view):
+	return view.substr(all_region(view))
+
+def write_view_to_file(view, path):
+	mkdirp(path)
+
+	view_encoding = view.encoding()
+	save_encoding = view_encoding if view_encoding != 'Undefined' else 'UTF-8'
+	with open(path, 'w', encoding = save_encoding) as fd:
+		fd.write(read_view(view))
+
+	sublime.status_message('Saved: '+path+' ('+save_encoding+')')
+
+def force_close_view(view):
+	view.set_scratch(True)
+
+	win = view.window()
+	win.focus_view(view)
+	win.run_command('close')
+
+def set_currently_running_command(cmd):
+	global currently_running_command
+	currently_running_command = cmd
+
+# Homedir handling
+def expand_homedir(path):
+	return os.path.expanduser(path)
+
+def abbr_homedir(path):
+	return path.replace(HOMEDIR, HOMEDIR_ABBR)
+
+HOMEDIR = ensure_path_sep_at_end(os.path.expanduser('~'))
+HOMEDIR_ABBR = ensure_path_sep_at_end('~')
+
+
+#
+# General
+#
+settings = {}
+def plugin_loaded():
+    global settings
+    settings = sublime.load_settings('NoDialogs.sublime-settings')
+
+class NoDialogsReplaceHelperCommand(sublime_plugin.TextCommand):
+	def run(self, edit, new_text):
+		self.view.replace(edit, all_region(self.view), new_text)
+
+
+#
+# Autocomplete
+#
+def autocomplete_file_name(raw_path):
+	path = expand_homedir(raw_path)
+
+	path_parts = path.rsplit(os.sep, 1)
+	dirname = path_parts[0]
+	basename = path_parts[1]
+
+	files = []
+	for file in os.listdir(dirname):
+		if os.path.isdir(os.path.join(dirname, file)):
+			files.append(ensure_path_sep_at_end(file))
+		else:
+			files.append(file)
+
+	if basename in files:
+		return [basename]
+	if not basename and not settings.get('no_dialogs_use_shell_like_autocomplete'):
 		return files
 
-def getCompletions(path, allowDirs=True):
-	dirname = os.path.dirname(path)
-	basename = os.path.basename(path)
+	# Ranking
+	def apathy_ranker(_):
+		return 0
 
-	def isDir(e):
-		return os.path.isdir(os.path.join(dirname, e))
+	def dir_lover_ranker(filename):
+		return 1 if os.path.isdir(os.path.join(dirname, file)) else 0
 
-	rawCompletions = getRawCompletions(path)
-	if not allowDirs:
-		rawCompletions = list(filter(lambda e: isDir(e), rawCompletions))
+	def dir_hater_ranker(filename):
+		return 1-dir_lover_ranker(filename)
 
-	if basename in rawCompletions:
-		return []
+	def prefix_ranker(filename):
+		rank = 0
+		for a, b in zip(basename, filename):
+			if a != b:
+				return rank
+			else:
+				rank += 1
+		return rank
 
-	ranked = [(e, 1 if isDir(e) else 0, getPrefixRank(e, basename)) for e in rawCompletions]
-	ranked.sort(key=lambda tup: tup[0])               # Sort by name
-	ranked.sort(key=lambda tup: tup[1], reverse=True) # Folders first
-	ranked.sort(key=lambda tup: tup[2], reverse=True) # Resort by rank
+	def terminal_ranker(filename):
+		return 1 if filename.startswith(basename) else 0
 
-	maxRank = ranked[0][2]
-	if maxRank == 0 and basename:
-		return []
+	ranker = prefix_ranker
+	dir_ranker = apathy_ranker
+	if settings.get('no_dialogs_use_shell_like_autocomplete'):
+		ranker = terminal_ranker
 
-	completions = []
-	for comp, _, rank in ranked:
-		if rank < maxRank:
-			break
+	folder_priority = settings.get('no_dialogs_folders_first')
+	if folder_priority == 'first':
+		dir_ranker = dir_lover_ranker
+	elif folder_priority == 'last':
+		dir_ranker = dir_hater_ranker
 
-		if allowDirs and isDir(comp):
-			completions.append(os.path.join(comp, ''))
+	ranked = [(ranker(file), file, dir_ranker(file)) for file in files]
+
+	if not settings.get('no_dialogs_use_shell_like_autocomplete'):
+		ranked.sort(key = lambda entry: entry[2], reverse=True) # Folder priority
+	ranked.sort(key = lambda entry: entry[0], reverse=True) # Sort by rank
+
+	# Leave only entries with maximum rank
+	max_ranked = []
+	max_rank = ranked[0][0]
+	if max_rank != 0:
+		for rank, filename, _ in ranked:
+			if rank < max_rank:
+				break
+
+			max_ranked.append(filename)
+	else:
+		max_ranked = [entry[1] for entry in ranked]
+
+	if settings.get('no_dialogs_use_shell_like_autocomplete'):
+		prefix = os.path.commonprefix(max_ranked)
+		if not prefix:
+			return [basename]
 		else:
-			completions.append(comp)
+			return [prefix]
+	else:
+		max_ranked.sort() # Sort by name
 
-	return completions
+		return max_ranked
 
-def mkdrip_file(path):
-	if not os.path.exists(os.path.dirname(path)):
-		os.makedirs(os.path.dirname(path))
+def autocomplete_path(path):
+	dirname = abbr_homedir(os.path.dirname(path))
 
-def view_putCursor_at_end(view):
-	sel = view.sel()
-	sel.clear()
+	return [os.path.join(dirname, completion) for completion in autocomplete_file_name(path)]
 
-	inputEnd = view.size()
-	sel.add(sublime.Region(inputEnd, inputEnd))
+def update_currently_open_prompt(view):
+	global currently_open_prompt
+	currently_open_prompt = view
 
-def view_select_allBut_reverse(view, message):
-	sel = view.sel()
-	sel.clear()
+	history_index = -1 # when prompt changes history has to start over
 
-	inputEnd = view.size()
-	sel.add(sublime.Region(inputEnd-len(message), inputEnd))
+def replace_view_text_with_edit(view, edit, new_text):
+	view.replace(edit, all_region(view), new_text)
+	view.sel().clear()
 
-def forceCloseView(view):
-	view.set_scratch(True)
-	view.window().run_command('close')
+def replace_view_text(view, new_text):
+	view.run_command('no_dialogs_replace_helper', {'new_text': new_text})
 
-class NoDialogsHelperReplaceCommand(sublime_plugin.TextCommand):
-	def run(self, edit, content):
-		self.view.replace(edit, sublime.Region(0, self.view.size()), content)
+def replace_prompt_text(new_text):
+	replace_view_text(currently_open_prompt, new_text)
 
-class SublimeDialog(sublime_plugin.WindowCommand):
-	def __init__(self, win):
-		self.accept_modifications = False
-		self.oldText = ""
+next_completion = False
+class NoDialogsAutocompleteNextCommand(sublime_plugin.TextCommand):
+	def run(self, _):
+		global next_completion
+		next_completion = True
 
-		self.completing = False
-		self.acceptDirs = True
-		self.completions = []
-		self.completionIndex = 0
-		self.completionCount = 0
+		self.view.run_command(settings.get('no_dialogs_right_arrow_default_command'), settings.get('no_dialogs_right_arrow_default_args'))
 
-		self.view = None
-		self.window = win
+class NoDialogsTabTriggerCommand(sublime_plugin.TextCommand):
+	def __init__(self, view):
+		self.last_change_count = None
+		self.completions = None
+		self.completions_count = None
+		self.last_completion_index = None
 
-		sublime_plugin.WindowCommand.__init__(self, win)
+		sublime_plugin.TextCommand.__init__(self, view)
 
-	def defaultDir(self):
-		folders = self.window.folders()
-		if folders:
-			return os.path.join(folders[0], "")
-		else:
-			return HOMEDIR
-
-	def defaultFile(self):
-		if self.view.file_name():
-			return self.view.file_name()
-		else:
-			return os.path.join(self.defaultDir(), self.view.name())
-
-	def completion_setupInput(self):
-		self.input.settings().set("auto_complete_commit_on_tab", False)
-		self.input.settings().set("tab_completion", False)
-		self.input.settings().set("translate_tabs_to_spaces", False)
-
-
-	def completion_next(self):
-		self.completionIndex += 1
-		if self.completionIndex == self.completionCount:
-			self.completionIndex = 0
-
-		return self.completions[self.completionIndex]
-
-	def completion_setContent(self, base, completion):
-		newContent = os.path.join(base, completion)
-		self.oldText = newContent
-
-		self.input.run_command('no_dialogs_helper_replace', {'content': newContent})
-
-
-	def on_modified(self, text):
-		if not self.accept_modifications:
+	def run(self, edit):
+		if settings.get('no_dialogs_autocomplete_mode') != 'tab_trigger':
 			return
 
-		sel = self.input.sel()[0]
-		text = self.input.substr(sublime.Region(0, sel.begin()))
+		text = read_view(self.view)
+		view_change_count = self.view.change_count()
 
-		if text.endswith('\t'):
-			path = text[:-1]
+		global next_completion
+		if next_completion:
+			self.last_change_count = None
+			next_completion = False
 
-			if self.completing and self.completionCount > 1 and self.oldText == path:
-				self.completion_setContent(getParent(path), self.completion_next())
-				return
+		def handle_first_completion():
+			self.last_change_count = view_change_count
+			self.completions = autocomplete_path(text)
+			self.completions_count = len(self.completions)
+			self.last_completion_index = 0
 
-			self.completions = getCompletions(path, self.acceptDirs)
-			if self.completions:
-				self.completing = True
-				self.completionIndex = 0
-				self.completionCount = len(self.completions)
+			replace_prompt_text(self.completions[self.last_completion_index])
 
-				self.completion_setContent(os.path.dirname(path), self.completions[0])
+		if self.last_change_count is None:
+			handle_first_completion()
+		elif view_change_count - self.last_change_count <= 1:
+			self.last_change_count = view_change_count
+
+			self.last_completion_index += 1
+			if self.last_completion_index >= self.completions_count:
+				self.last_completion_index = 0
+
+			replace_prompt_text(self.completions[self.last_completion_index])
+		else:
+			self.last_change_count = None
+			self.completions = None
+			self.completions_count = None
+			self.last_completion_index = None
+
+			handle_first_completion()
+
+
+
+
+#
+# History
+#
+COMMANDS = ['save', 'copy', 'move', 'open']
+global_history = []
+save_history = []
+copy_history = []
+move_history = []
+history_index = -1
+history_current_edit = None
+
+def add_to_history(entry):
+	history_current_edit = None
+
+	if currently_running_command is None:
+		print('[NoDialogs] !FIXME! No command is running, yet history is being updated')
+		return
+
+	if settings.get('no_dialogs_use_global_history'):
+		if currently_running_command not in COMMANDS:
+			print('[NoDialogs] !FIXME! Unknown command is running '+currently_running_command)
+
+		global global_history
+		global_history.insert(0, entry)
+		return
+
+	if currently_running_command == 'save':
+		global save_history
+		save_history.insert(0, entry)
+	elif currently_running_command == 'copy':
+		global copy_history
+		copy_history.insert(0, entry)
+	elif currently_running_command == 'move':
+		global move_history
+		move_history.insert(0, entry)
+	else:
+		print('[NoDialogs] !FIXME! Unknown command is running '+currently_running_command)
+		if currently_running_command not in COMMANDS:
+ 			print('[NoDialogs] !FIXME! Command is in COMMANDS, but not handled properly by add_to_history '+currently_running_command)
+
+def retrive_history():
+	if currently_running_command is None:
+		print('[NoDialogs] !FIXME! No command is running, yet history is being read')
+		return
+
+	history = None
+
+	if settings.get('no_dialogs_use_global_history'):
+		if currently_running_command not in COMMANDS:
+			print('[NoDialogs] !FIXME! Unknown command is running '+currently_running_command)
+
+		global global_history
+		history = global_history
+	elif currently_running_command == 'save':
+		global save_history
+		history = save_history
+	elif currently_running_command == 'copy':
+		global copy_history
+		history = copy_history
+	elif currently_running_command == 'move':
+		global move_history
+		history = move_history
+	else:
+		print('[NoDialogs] !FIXME! Unknown command is running '+currently_running_command)
+		if currently_running_command not in COMMANDS:
+			print('[NoDialogs] !FIXME! Command is in COMMANDS, but not handled properly by add_to_history '+currently_running_command)
+		return
+
+	return history
+
+def read_from_history(index):
+	return retrive_history()[index]
+
+def history_size():
+	return len(retrive_history())
+
+class NoDialogsHistoryPreviousCommand(sublime_plugin.TextCommand):
+	def run(self, edit):
+		if not settings.get('no_dialogs_allow_history'):
+			return
+		if currently_running_command not in settings.get('no_dialogs_allow_history_in'):
+			return
+
+		global history_index
+
+		hist_size = history_size()
+		if hist_size == 0:
+			return
+
+		global history_current_edit
+		if history_index == -1:
+			history_current_edit = read_view(self.view)
+
+		history_index += 1
+		if history_index >= hist_size:
+			if settings.get('no_dialogs_cycle_history'):
+				history_index = -1
 			else:
-				self.completing = False
-				self.oldText = ''
+				history_index = hist_size-1
 
-				# Can't use completion_setContent as there is not completion
-				self.input.run_command('no_dialogs_helper_replace', {'content': path})
-		elif self.oldText != text:
-			self.completing = False
-			self.oldText = ''
+		if history_index == -1:
+			new_text = history_current_edit
+		else:
+			new_text = read_from_history(history_index)
 
+		replace_view_text_with_edit(self.view, edit, new_text)
+
+class NoDialogsHistoryNextCommand(sublime_plugin.TextCommand):
+	def run(self, edit):
+		if not settings.get('no_dialogs_allow_history'):
+			return
+		if currently_running_command not in settings.get('no_dialogs_allow_history_in'):
+			return
+
+		global history_index
+
+		hist_size = history_size()
+		if hist_size == 0:
+			return
+
+		history_index -= 1
+		if history_index < -1:
+			if settings.get('no_dialogs_cycle_history'):
+				history_index = hist_size-1
+			else:
+				history_index = -1
+
+		global history_current_edit
+		if history_index == -1:
+			new_text = history_current_edit
+		else:
+			new_text = read_from_history(history_index)
+
+		replace_view_text_with_edit(self.view, edit, new_text)
 
 #
-# Open
+# Save commands
 #
-class NoDialogsCreateOpenPromptCommand(SublimeDialog):
-	def __init__(self, view):
-		self.input = None
-		SublimeDialog.__init__(self, view)
+class NoDialogsCreateSavePromptCommand(sublime_plugin.ApplicationCommand):
+	def __init__(self):
+		self.window = None
+		self.view = None
 
-	def on_open_inputEnd(self, path):
-		self.window.open_file(path)
+		self.prompt = None
+		self.path = None
 
-	def run(self):
+		sublime_plugin.ApplicationCommand.__init__(self)
+
+	#
+	# Helpers
+	def resave(self):
+		mkdirp(self.view.file_name())
+		self.view.run_command('save')
+
+	def update_prompt(self, prompt):
+		self.prompt = prompt
+		update_currently_open_prompt(self.prompt)
+
+	def alias_window_and_view(self):
+		self.window = sublime.active_window()
 		self.view = self.window.active_view()
 
-		self.input = self.window.show_input_panel("Open:", self.defaultDir(), self.on_open_inputEnd, self.on_modified, None)
+	def cleanup(self):
+		self.window = None
+		self.view = None
 
-		sel = self.input.sel()
-		sel.clear()
+		self.update_prompt(None)
+		self.path = None
 
-		selStart = len(HOMEDIR)
-		inputEnd = self.input.size()
-		sel.add(sublime.Region(selStart, inputEnd))
-
-		self.completion_setupInput()
-		self.accept_modifications = True
-
-
-#
-# Save
-#
-class SaveAsThread(threading.Thread):
-	def __init__(self, view, window, path, callback):
-		self.view = view
-		self.window = window
-		self.path = path
-		self.callback = callback
-		threading.Thread.__init__(self)
-
-	def run(self):
-		mkdrip_file(self.path)
-
-		with open(self.path, 'w', encoding='utf8') as f:
-			f.write(self.view.substr(sublime.Region(0, self.view.size())))
-
-		forceCloseView(self.view)
+	def reopen_from_new_path(self):
+		force_close_view(self.view)
 		self.window.open_file(self.path)
-
 		self.window.run_command('hide_panel')
 
-		self.callback()
-
-class MkdripSaveThread(threading.Thread):
-	def __init__(self, view, path, callback):
-		self.view = view
-		self.path = path
-		self.callback = callback
-		threading.Thread.__init__(self)
-
-	def run(self):
-		mkdrip_file(self.path)
-		self.view.run_command("save")
-
-		self.callback()
-
-class Send2TrashThread(threading.Thread):
-	def __init__(self, path, callback):
-		self.callback = callback
-		self.path = path
-		threading.Thread.__init__(self)
-
-	def run(self):
-		if VERSION < 3000:
-			from send2trash import send2trash # ST2
-		else:
-			from .send2trash import send2trash # ST3
-
+	def trash_file(self):
 		send2trash(self.path)
 
-		self.callback()
+	#
+	# Subroutines
+	def probable_dirname_and_basename(self):
+		basename = ''
+		dirname = HOMEDIR
 
-class NoDialogsCreateGenericSavePrompt(SublimeDialog):
-	def saveAs(self, path):
-		self.beforeSaveHook(path)
-		SaveAsThread(self.view, self.window, path, functools.partial(self.afterSaveHook, path)).start()
+		view_name = self.view.name()
+		if view_name is not None and view_name:
+			basename = view_name
+		elif settings.get('no_dialogs_use_untitled_files'):
+			basename = settings.get('no_dialogs_untitled_file_name')
 
-	def overwrite_ifAnswerPositive(self, path, ans):
-		if (not ans) or ("NnFf".find(ans[0]) == -1):
-			Send2TrashThread(path, functools.partial(self.saveAs, path)).start()
+		open_folders = self.window.folders()
+		if open_folders is not None and open_folders:
+			dirname = ensure_path_sep_at_end(open_folders[0])
 
-	def on_saveTo_inputEnd(self, inputPath):
-		if os.path.isdir(inputPath):
-			message = "untitled"
-			placeholder = os.path.join(self.defaultDir(), message)
+		return (abbr_homedir(dirname), basename)
 
-			self.input = self.window.show_input_panel("Save:", placeholder, self.on_saveTo_inputEnd, self.on_modified, None)
-			view_select_allBut_reverse(self.input, message)
+	def finish_the_job(self):
+		add_to_history(abbr_homedir(self.path))
 
-			self.completion_setupInput()
-			self.accept_modifications = True
-		else:
-			if os.path.lexists(inputPath):
-				query = "Overwrite? (Y/y T/t N/n F/f) (defaults to YES):"
-				onDone = functools.partial(self.overwrite_ifAnswerPositive, inputPath)
+		write_view_to_file(self.view, self.path)
+		self.reopen_from_new_path()
 
-				self.window.show_input_panel(query, "", onDone, None, None)
-			else:
-				self.saveAs(inputPath)
+		self.cleanup()
 
-	def run(self):
-		return
+	#
+	# Event handlers
+	def on_overwrite_answer(self, answer):
+		if not answer:
+			answer = settings.get('no_dialogs_overwrite_by_default')
 
-	def beforeSaveHook(self, path):
-		return
-
-	def afterSaveHook(self, path):
-		return
-
-class NoDialogsCreateSavePromptCommand(NoDialogsCreateGenericSavePrompt):
-	def resave(self, path):
-		self.view.set_status("NoDialogs_resave", "Saving changes: "+os.path.basename(path))
-
-		MkdripSaveThread(self.view, path, functools.partial(self.view.erase_status, "NoDialogs_resave")).start()
-
-	def run(self):
-		self.view = self.window.active_view()
-
-		curPath = self.view.file_name()
-		if curPath:
-			self.resave(curPath)
-		else:
-			self.input = self.window.show_input_panel("Save:", self.defaultFile(), self.on_saveTo_inputEnd, self.on_modified, None)
-			view_putCursor_at_end(self.input)
-
-			self.completion_setupInput()
-			self.accept_modifications = True
-
-	def beforeSaveHook(self, path):
-		self.view.set_status("NoDialogs_save", "Saving: "+os.path.basename(path))
-
-	def afterSaveHook(self, path):
-		self.view.erase_status("NoDialogs_save")
-
-class NoDialogsCreateCopyPromptCommand(NoDialogsCreateGenericSavePrompt):
-	def run(self):
-		self.view = self.window.active_view()
-
-		self.input = self.window.show_input_panel("Copy:", self.defaultFile(), self.on_saveTo_inputEnd, self.on_modified, None)
-		view_select_allBut_reverse(self.input, os.path.basename(self.defaultFile()))
-
-		self.completion_setupInput()
-		self.accept_modifications = True
-
-	def beforeSaveHook(self, path):
-		self.view.set_status("NoDialogs_copy", "Copying: "+os.path.basename(path))
-
-	def afterSaveHook(self, path):
-		self.view.erase_status("NoDialogs_copy")
-		# Send2TrashThread(path, functools.partial(self.view.erase_status, "NoDialogs_copy")).start()
-
-class NoDialogsCreateMovePromptCommand(NoDialogsCreateGenericSavePrompt):
-	def run(self):
-		self.view = self.window.active_view()
-
-		curPath = self.defaultFile()
-		self.oldPath = curPath
-
-		self.input = self.window.show_input_panel("Move:", curPath, self.on_saveTo_inputEnd, self.on_modified, None)
-		view_select_allBut_reverse(self.input, os.path.basename(curPath))
-
-		self.completion_setupInput()
-		self.accept_modifications = true
-
-	def beforeSaveHook(self, path):
-		self.view.set_status("NoDialogs_move", "Moving: "+os.path.basename(path))
-
-	def afterSaveHook(self, path):
-		Send2TrashThread(self.oldPath, functools.partial(self.view.erase_status, "NoDialogs_move")).start()
-
-
-#
-# Delete
-#
-
-class NoDialogsCreateDeletePromptCommand(SublimeDialog):
-	def closeView_ifAnswerPositive(self, ans):
-		if (not ans) or ("YyTt".find(ans[0]) == -1):
+		if 'Nn'.find(answer[0]) != -1:
+			self.cleanup()
 			return
 
-		forceCloseView(self.view)
+		self.trash_file() # move overwritten file to trash
+		self.finish_the_job()
+
+	def on_done(self, path):
+		self.path = expand_homedir(ensure_path_sep_at_end_of_folders(path))
+
+		if os.path.isdir(self.path):
+			self.cleanup()
+			self.alias_window_and_view()
+			self.create_prompt(path, settings.get('no_dialogs_untitled_file_name'))
+			return
+
+		if os.path.exists(self.path):
+			prompt = 'File exists. Overwrite? (defaults to '+settings.get('no_dialogs_overwrite_by_default')+')'
+			self.window.show_input_panel(prompt, '', self.on_overwrite_answer, None, self.cleanup)
+			return
+
+		self.finish_the_job()
+
+	def on_cancel(self):
+		self.cleanup()
+
+	#
+	# Main code
+	PROMPT = 'Save:'
+	def create_prompt(self, prefix, selected_text):
+		prefix = abbr_homedir(prefix)
+
+		default_text = os.path.join(prefix, selected_text) if selected_text else prefix
+		self.update_prompt(self.window.show_input_panel(self.PROMPT, default_text, self.on_done, None, self.on_cancel))
+
+		if selected_text:
+			size = self.prompt.size()
+			sel = self.prompt.sel()
+			sel.clear()
+			sel.add(sublime.Region(size - len(selected_text), size))
+
+	COMMAND_NAME = 'save'
+	def pre_run(self):
+		self.cleanup()
+		set_currently_running_command(self.COMMAND_NAME)
+		self.alias_window_and_view()
 
 	def run(self):
-		self.view = self.window.active_view()
+		self.pre_run()
 
-		curPath = self.view.file_name()
-		if curPath and os.path.exists(curPath):
-			def callback():
-				self.view.erase_status("NoDialogs_delete")
+		if can_resave(self.view):
+			self.resave()
+			return
 
-				self.view.set_status("NoDialogs_deleteOk", "Moved to trash: "+os.path.basename(curPath))
-				threading.Timer(2.0, functools.partial(self.view.erase_status, "NoDialogs_deleteOk"), None).start()
+		(dirname, basename) = self.probable_dirname_and_basename()
+		self.create_prompt(dirname, basename)
 
-			self.view.set_status("NoDialogs_delete", "Deleting: "+os.path.basename(curPath))
-			Send2TrashThread(curPath, callback).start()
-		else:
-			self.window.show_input_panel("Discard? (Y/y T/t N/n F/f) (defaults to NO):", "", functools.partial(self.closeView_ifAnswerPositive), None, None)
+class NoDialogsCreateCopyPromptCommand(NoDialogsCreateSavePromptCommand):
+	PROMPT = 'Save copy as:'
+	COMMAND_NAME = 'copy'
+	def finish_the_job(self):
+		add_to_history(abbr_homedir(self.path))
+
+		write_view_to_file(self.view, self.path)
+		self.cleanup()
+
+	def run(self):
+		self.pre_run()
+
+		if not can_resave(self.view):
+			(dirname, basename) = self.probable_dirname_and_basename()
+			self.create_prompt(dirname, basename)
+			return
+
+		view_file_name = self.view.file_name()
+		self.create_prompt(view_file_name, '')
+
+		(_, basename) = os.path.split(view_file_name)
+		(__, extname) = os.path.splitext(basename)
+
+		size = self.prompt.size()
+		sel = self.prompt.sel()
+		sel.clear()
+		sel.add( sublime.Region(size - len(basename), size - len(extname)) )
+
+class NoDialogsCreateMovePromptCommand(NoDialogsCreateCopyPromptCommand):
+	PROMPT = 'Move to:'
+	COMMAND_NAME = 'move'
+	def finish_the_job(self):
+		add_to_history(abbr_homedir(self.path))
+
+		view_file_name = self.view.file_name() # destroy old copy
+		if view_file_name:
+			send2trash(view_file_name)
+
+		write_view_to_file(self.view, self.path)
+		self.reopen_from_new_path()
+
+		self.cleanup()
 
 
 #
-# Close tab
+# Close commands
 #
+class NoDialogsCreateClosePromptCommand(sublime_plugin.ApplicationCommand):
+	def __init__(self):
+		self.window = None
+		self.view = None
 
-class NoDialogsCreateClosePromptCommand(SublimeDialog):
-	def closeView_ifAnswerPositive(self, ans):
-		if (not ans) or ("YyTt".find(ans[0]) == -1):
-			forceCloseView(self.view)
+		self.last_focused_view = None
+		self.save_on_focus_lost_was = None
 
-	def run(self):
+		sublime_plugin.ApplicationCommand.__init__(self)
+
+	def cleanup(self):
+		self.window.focus_view(self.last_focused_view)
+		self.view.settings().set('save_on_focus_lost', self.save_on_focus_lost_was)
+
+		self.window = None
+		self.view = None
+
+		self.last_focused_view = None
+		self.save_on_focus_lost_was = None
+
+	def alias_window_and_view(self):
+		self.window = sublime.active_window()
 		self.view = self.window.active_view()
 
-		if not self.view:
-			return self.window.run_command('close')
+	def finish_the_job(self):
+		self.view.settings().set('save_on_focus_lost', False)
+		force_close_view(self.view)
 
-		if self.view.file_name() and not os.path.exists(self.view.file_name()) or self.view.is_dirty():
-			self.window.show_input_panel("Discard? (Y/y T/t N/n F/f) (defaults to YES):", "", functools.partial(self.closeView_ifAnswerPositive), None, None)
+		self.cleanup()
+
+	def on_overwrite_answer(self, answer):
+		if not answer:
+			answer = settings.get(self.DISCARD_SETTING)
+
+		if 'Nn'.find(answer[0]) != -1:
+			self.cleanup()
+			return
+
+		self.finish_the_job()
+
+	def will_closing_discard(self, view):
+		if view is None:
+			return False
+
+		view_file_name = self.view.file_name()
+		return self.view.is_dirty() or view_file_name and not os.path.exists(view_file_name)
+
+	DISCARD_SETTING = 'no_dialogs_discard_by_default'
+	def show_discard_prompt(self):
+		view_settings = self.view.settings()
+		self.save_on_focus_lost_was = view_settings.get('save_on_focus_lost')
+		view_settings.set('save_on_focus_lost', False)
+
+		self.window.show_input_panel('Discard? (defaults to '+settings.get(self.DISCARD_SETTING)+')', '', self.on_overwrite_answer, None, self.cleanup)
+
+	def run(self):
+		self.alias_window_and_view()
+
+		if self.will_closing_discard(self.view):
+			self.show_discard_prompt()
+			return
+
+		self.window.run_command('close')
+
+class NoDialogsCreateCloseWindowPromptCommand(NoDialogsCreateClosePromptCommand):
+	DISCARD_SETTING = 'no_dialogs_discard_in_window_by_default'
+	def finish_the_job(self):
+		self.view.set_scratch(True)
+		self.view.settings().set('save_on_focus_lost', False)
+
+		self.cleanup()
+		sublime.run_command('no_dialogs_create_close_window_prompt')
+
+	def run(self):
+		self.window = sublime.active_window()
+
+		for view in self.window.views():
+			self.view = view
+
+			if not self.will_closing_discard(view):
+				continue
+
+			self.last_focused_view = self.window.active_view()
+			self.window.focus_view(view)
+
+			self.show_discard_prompt()
+			return # wait for input, then start over
+
+		self.window.run_command('close_window')
+
+class NoDialogsCreateExitPromptCommand(NoDialogsCreateClosePromptCommand):
+	DISCARD_SETTING = 'no_dialogs_discard_on_exit_by_default'
+	def finish_the_job(self):
+		self.view.set_scratch(True)
+		self.view.settings().set('save_on_focus_lost', False)
+
+		self.cleanup()
+		sublime.run_command('no_dialogs_create_exit_prompt')
+
+	def run(self):
+		for win in sublime.windows():
+			self.window = win
+			for view in self.window.views():
+				self.view = view
+
+				if not self.will_closing_discard(view):
+					continue
+
+				self.last_focused_view = self.window.active_view()
+				self.window.focus_view(view)
+
+				self.show_discard_prompt()
+				return # wait for input, then start over
+
+		sublime.run_command('exit')
+
+
+#
+# Rest of the commands
+#
+
+class NoDialogsCreateDeletePromptCommand(sublime_plugin.ApplicationCommand):
+	def __init__(self):
+		self.window = None
+		self.view = None
+
+		sublime_plugin.ApplicationCommand.__init__(self)
+
+	def cleanup(self):
+		self.window = None
+		self.view = None
+
+	def alias_window_and_view(self):
+		self.window = sublime.active_window()
+		self.view = self.window.active_view()
+
+	def finish_the_job(self):
+		send2trash(self.view.file_name())
+		if settings.get('no_dialogs_close_on_deletion'):
+			force_close_view(self.view)
+
+		self.cleanup()
+
+	def on_overwrite_answer(self, answer):
+		if not answer:
+			answer = settings.get('no_dialogs_delete_by_default')
+
+		if 'Nn'.find(answer[0]) != -1:
+			self.cleanup()
+			return
+
+		self.finish_the_job()
+
+	def show_prompt(self):
+		self.window.show_input_panel('Delete? (defaults to '+settings.get('no_dialogs_delete_by_default')+')', '', self.on_overwrite_answer, None, self.cleanup)
+
+	def run(self):
+		self.alias_window_and_view()
+
+		view_file_name = self.view.file_name()
+		if not view_file_name or not os.path.exists(view_file_name):
+			sublime.run_command('no_dialogs_create_close_prompt')
+			return
+
+		if not settings.get('no_dialogs_delete_without_prompt'):
+			self.show_prompt()
 		else:
-			self.window.run_command('close')
+			self.finish_the_job()
 
+class NoDialogsCreateOpenPrompt(sublime_plugin.ApplicationCommand):
+	def __init__(self):
+		self.window = None
+		self.view = None
+
+		self.prompt = None
+		self.path = None
+
+		sublime_plugin.ApplicationCommand.__init__(self)
+
+	def alias_window_and_view(self):
+		self.window = sublime.active_window()
+		self.view = self.window.active_view()
+
+	def cleanup(self):
+		self.window = None
+		self.view = None
+
+		self.update_prompt(None)
+		self.path = None
+
+	def update_prompt(self, prompt):
+		self.prompt = prompt
+		update_currently_open_prompt(self.prompt)
+
+	def probable_dirname_and_basename(self):
+		basename = ''
+		dirname = HOMEDIR
+
+		view_file_name = self.view.file_name()
+		if view_file_name:
+			return (abbr_homedir(os.path.dirname(view_file_name)), os.path.basename(view_file_name))
+
+		view_name = self.view.name()
+		if view_name is not None and view_name:
+			basename = view_name
+
+		open_folders = self.window.folders()
+		if open_folders is not None and open_folders:
+			dirname = ensure_path_sep_at_end(open_folders[0])
+
+		return (abbr_homedir(dirname), basename)
+
+	def on_done(self, path):
+		self.path = expand_homedir(ensure_path_sep_at_end_of_folders(path))
+
+		add_to_history(abbr_homedir(self.path))
+
+		if os.path.isdir(self.path):
+			project = self.window.project_data()
+
+			if project:
+				if project["folders"]:
+					for folder in project["folders"]:
+						if folder["path"] and folder["path"] == path:
+							return
+
+					project["folders"].append({"path": path})
+				else:
+					project["folders"] = [path]
+			else:
+				project = {"folders": [{"path": path}]}
+
+			self.window.set_project_data(project)
+
+			self.cleanup()
+			return
+
+		self.window.open_file(path)
+		self.cleanup()
+
+	def on_cancel(self):
+		self.cleanup()
+
+	def create_prompt(self, prefix, selected_text):
+		prefix = abbr_homedir(prefix)
+
+		default_text = os.path.join(prefix, selected_text) if selected_text else prefix
+		self.update_prompt(self.window.show_input_panel('Open:', default_text, self.on_done, None, self.on_cancel))
+
+		if selected_text:
+			size = self.prompt.size()
+			sel = self.prompt.sel()
+			sel.clear()
+			sel.add(sublime.Region(size - len(selected_text), size))
+
+	def run(self):
+		self.cleanup()
+		set_currently_running_command('open')
+		self.alias_window_and_view()
+
+		(dirname, basename) = self.probable_dirname_and_basename()
+		self.create_prompt(dirname, basename)
+
+
+#
+# Event listener
+#
+currently_open_prompt = None
+currently_running_command = None
+class NoDialogsEventListener(sublime_plugin.EventListener):
+	def on_query_completions(self, view, prefix, locations):
+		if settings.get('no_dialogs_autocomplete_mode') != 'default':
+			return
+		if currently_open_prompt is None or currently_open_prompt != view:
+			return
+
+		comps = autocomplete_file_name(read_view(view))
+		flags = 0
+		flags |= sublime.INHIBIT_WORD_COMPLETIONS if settings.get('no_dialogs_inhibit_word_completions') else 0
+		flags |= sublime.INHIBIT_EXPLICIT_COMPLETIONS if settings.get('no_dialogs_inhibit_explicit_completions') else 0
+
+		return ([[comp, comp] for comp in comps], flags)
+
+	def on_query_context(_, __, key, ___, ____, _____):
+		if key == 'no_dialogs_prompt_open' and currently_open_prompt is not None:
+			return True
+		elif key == 'no_dialogs_no_shell_like_autocomplete' and not settings.get('no_dialogs__shell_like_autocomplete'):
+			return True
+		elif key == 'no_dialogs_right_arrow_override' and settings.get('no_dialogs_right_arrow_override') and currently_running_command in ['save', 'copy', 'move', 'open']:
+			return True
+		elif key == 'no_dialogs_allow_history' and settings.get('no_dialogs_allow_history') and currently_running_command in settings.get('no_dialogs_allow_history_in'):
+			return True
