@@ -2,10 +2,12 @@ import sublime, sublime_plugin
 import os
 import errno
 
-if int(sublime.version()) < 3000:
-	from send2trash import send2trash # ST2
+ST2 = int(sublime.version()) < 3000
+
+if ST2:
+	from send2trash import send2trash
 else:
-	from .send2trash import send2trash # ST3
+	from .send2trash import send2trash
 
 #
 # Helpers
@@ -40,12 +42,18 @@ def read_view(view):
 def write_view_to_file(view, path):
 	mkdirp(path)
 
-	view_encoding = view.encoding()
-	save_encoding = view_encoding if view_encoding != 'Undefined' else 'UTF-8'
-	with open(path, 'w', encoding = save_encoding) as fd:
-		fd.write(read_view(view))
+	if ST2:
+		with open(path, 'w') as fd:
+			fd.write(read_view(view))
 
-	sublime.status_message('Saved: '+path+' ('+save_encoding+')')
+		sublime.status_message('Saved: '+path)
+	else:
+		view_encoding = view.encoding()
+		save_encoding = view_encoding if view_encoding != 'Undefined' else 'UTF-8'
+		with open(path, 'w', encoding = save_encoding) as fd:
+			fd.write(read_view(view))
+
+		sublime.status_message('Saved: '+path+' ('+save_encoding+')')
 
 def force_close_view(view):
 	view.set_scratch(True)
@@ -76,6 +84,9 @@ settings = {}
 def plugin_loaded():
     global settings
     settings = sublime.load_settings('NoDialogs.sublime-settings')
+
+if ST2:
+	plugin_loaded()
 
 class NoDialogsReplaceHelperCommand(sublime_plugin.TextCommand):
 	def run(self, edit, new_text):
@@ -175,11 +186,19 @@ def update_currently_open_prompt(view):
 	global currently_open_prompt
 	currently_open_prompt = view
 
+	global history_index
 	history_index = -1 # when prompt changes history has to start over
+
+	global glob_change_count
+	glob_change_count = 0
 
 def replace_view_text_with_edit(view, edit, new_text):
 	view.replace(edit, all_region(view), new_text)
-	view.sel().clear()
+
+	size = view.size()
+	sel = view.sel()
+	sel.clear()
+	sel.add(sublime.Region(size, size))
 
 def replace_view_text(view, new_text):
 	view.run_command('no_dialogs_replace_helper', {'new_text': new_text})
@@ -195,6 +214,15 @@ class NoDialogsAutocompleteNextCommand(sublime_plugin.TextCommand):
 
 		self.view.run_command(settings.get('no_dialogs_right_arrow_default_command'), settings.get('no_dialogs_right_arrow_default_args'))
 
+if ST2:
+	glob_change_count = 0
+def modification_counter(_):
+	if not ST2:
+		return
+
+	global glob_change_count
+	glob_change_count += 1
+
 class NoDialogsTabTriggerCommand(sublime_plugin.TextCommand):
 	def __init__(self, view):
 		self.last_change_count = None
@@ -209,7 +237,12 @@ class NoDialogsTabTriggerCommand(sublime_plugin.TextCommand):
 			return
 
 		text = read_view(self.view)
-		view_change_count = self.view.change_count()
+
+		if ST2:
+			global glob_change_count
+			view_change_count = glob_change_count
+		else:
+			view_change_count = self.view.change_count()
 
 		global next_completion
 		if next_completion:
@@ -472,7 +505,7 @@ class NoDialogsCreateSavePromptCommand(sublime_plugin.ApplicationCommand):
 
 		if os.path.exists(self.path):
 			prompt = 'File exists. Overwrite? (defaults to '+settings.get('no_dialogs_overwrite_by_default')+')'
-			self.window.show_input_panel(prompt, '', self.on_overwrite_answer, None, self.cleanup)
+			self.window.show_input_panel(prompt, '', self.on_overwrite_answer, modification_counter, self.cleanup)
 			return
 
 		self.finish_the_job()
@@ -487,7 +520,7 @@ class NoDialogsCreateSavePromptCommand(sublime_plugin.ApplicationCommand):
 		prefix = abbr_homedir(prefix)
 
 		default_text = os.path.join(prefix, selected_text) if selected_text else prefix
-		self.update_prompt(self.window.show_input_panel(self.PROMPT, default_text, self.on_done, None, self.on_cancel))
+		self.update_prompt(self.window.show_input_panel(self.PROMPT, default_text, self.on_done, modification_counter, self.on_cancel))
 
 		if selected_text:
 			size = self.prompt.size()
@@ -569,7 +602,8 @@ class NoDialogsCreateClosePromptCommand(sublime_plugin.ApplicationCommand):
 		sublime_plugin.ApplicationCommand.__init__(self)
 
 	def cleanup(self):
-		self.window.focus_view(self.last_focused_view)
+		if self.last_focused_view is not None:
+			self.window.focus_view(self.last_focused_view)
 		self.view.settings().set('save_on_focus_lost', self.save_on_focus_lost_was)
 
 		self.window = None
@@ -611,7 +645,7 @@ class NoDialogsCreateClosePromptCommand(sublime_plugin.ApplicationCommand):
 		self.save_on_focus_lost_was = view_settings.get('save_on_focus_lost')
 		view_settings.set('save_on_focus_lost', False)
 
-		self.window.show_input_panel('Discard? (defaults to '+settings.get(self.DISCARD_SETTING)+')', '', self.on_overwrite_answer, None, self.cleanup)
+		self.window.show_input_panel('Discard? (defaults to '+settings.get(self.DISCARD_SETTING)+')', '', self.on_overwrite_answer, modification_counter, self.cleanup)
 
 	def run(self):
 		self.alias_window_and_view()
@@ -712,7 +746,7 @@ class NoDialogsCreateDeletePromptCommand(sublime_plugin.ApplicationCommand):
 		self.finish_the_job()
 
 	def show_prompt(self):
-		self.window.show_input_panel('Delete? (defaults to '+settings.get('no_dialogs_delete_by_default')+')', '', self.on_overwrite_answer, None, self.cleanup)
+		self.window.show_input_panel('Delete? (defaults to '+settings.get('no_dialogs_delete_by_default')+')', '', self.on_overwrite_answer, modification_counter, self.cleanup)
 
 	def run(self):
 		self.alias_window_and_view()
@@ -805,7 +839,7 @@ class NoDialogsCreateOpenPrompt(sublime_plugin.ApplicationCommand):
 		prefix = abbr_homedir(prefix)
 
 		default_text = os.path.join(prefix, selected_text) if selected_text else prefix
-		self.update_prompt(self.window.show_input_panel('Open:', default_text, self.on_done, None, self.on_cancel))
+		self.update_prompt(self.window.show_input_panel('Open:', default_text, self.on_done, modification_counter, self.on_cancel))
 
 		if selected_text:
 			size = self.prompt.size()
