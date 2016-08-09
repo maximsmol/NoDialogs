@@ -22,9 +22,9 @@
 							{
 								"command": "open_file",
 								"args": {
-									"file": "${packages}/NoDialogs/UNLICENSE.txt"
+									"file": "${packages}/NoDialogs/LICENSE.txt"
 								},
-								"caption": "UNLICENSE"
+								"caption": "LICENSE"
 							},
 							{"caption": "-"},
 							{
@@ -41,15 +41,28 @@
 									"base_file": "${packages}/NoDialogs/Default ($platform).sublime-keymap",
 									"default": "[\n\t$0\n]\n"
 								},
-								"caption": "Key Bindings - Platform Specific"
+								"caption": "Key Bindings"
+							},
+							{"caption": "-"},
+							{
+								"command": "open_file",
+								"args": {"file": "${packages}/NoDialogs/NoDialogs.sublime-settings"},
+								"caption": "Settings - Default"
 							},
 							{
-								"command": "edit_settings",
-								"args": {
-									"base_file": "${packages}/NoDialogs/Default.sublime-keymap",
-									"default": "[\n\t$0\n]\n"
-								},
-								"caption": "Key Bindings"
+								"command": "open_file",
+								"args": {"file": "${packages}/User/NoDialogs.sublime-settings"},
+								"caption": "Settings - User"
+							},
+							{
+								"command": "open_file",
+								"args": {"file": "${packages}/NoDialogs/Default ($platform).sublime-keymap"},
+								"caption": "Key Bindings - Default"
+							},
+							{
+								"command": "open_file",
+								"args": {"file": "${packages}/User/Default ($platform).sublime-keymap"},
+								"caption": "Key Bindings - User"
 							}
 						]
 					 }
