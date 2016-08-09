@@ -56,7 +56,7 @@
 
 	// Where exactly whould history be allowed
 	// !ATTENTION! does not override plugin-wide setting
-	"no_dialogs_allow_history_in": ["save", "copy", "move"],
+	"no_dialogs_allow_history_in": ["save", "copy", "move", "open"],
 
 	// Should history be stored plugin-wide
 	// If set to false, each command has it's own history
