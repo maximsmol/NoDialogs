@@ -28,8 +28,8 @@
 		"command": "no_dialogs_create_close_window_prompt"
 	},
 	{
-		"caption": "NoDialogs: Exit",
-		"command": "no_dialogs_create_exit_prompt"
+		"ignore-caption": "NoDialogs: Exit",
+		"ignore-command": "no_dialogs_create_exit_prompt"
 	},
 	{
 		"caption": "NoDialogs: Open README",
@@ -43,7 +43,7 @@
 		"command": "open_file",
 		"args": {
 			"file": "${packages}/NoDialogs/LICENSE.txt"
-		},
+		}
 	},
 	{
 		"caption": "NoDialogs: Edit Settings",
@@ -58,7 +58,35 @@
 		"command": "edit_settings",
 		"args": {
 			"base_file": "${packages}/NoDialogs/Default ($platform).sublime-keymap",
-			"default": "[\n\t$0\n]\n"
+			"default": "{\n\t$0\n}\n"
+		}
+	},
+	{
+		"caption": "NoDialogs: Default Settings (ST2)",
+		"command": "open_file",
+		"args": {
+			"file": "${packages}/NoDialogs/NoDialogs.sublime-settings"
+		}
+	},
+	{
+		"caption": "NoDialogs: User Settings (ST2)",
+		"command": "open_file",
+		"args": {
+			"file": "${packages}/User/NoDialogs.sublime-settings"
+		}
+	},
+	{
+		"caption": "NoDialogs: Default Keybindings (ST2)",
+		"command": "edit_settings",
+		"args": {
+			"file": "${packages}/NoDialogs/Default ($platform).sublime-keymap"
+		}
+	},
+	{
+		"caption": "NoDialogs: User Keybindings (ST2)",
+		"command": "edit_settings",
+		"args": {
+			"file": "${packages}/User/Default ($platform).sublime-keymap"
 		}
 	}
 ]
