@@ -257,6 +257,9 @@ class NoDialogsTabTriggerCommand(sublime_plugin.TextCommand):
 
 			replace_prompt_text(self.completions[self.last_completion_index])
 
+			if self.completions_count == 1:
+				self.last_change_count = None
+
 		if self.last_change_count is None:
 			handle_first_completion()
 		elif view_change_count - self.last_change_count <= 1:
@@ -792,7 +795,7 @@ class NoDialogsCreateOpenPrompt(sublime_plugin.ApplicationCommand):
 
 		view_file_name = self.view.file_name()
 		if view_file_name:
-			return (abbr_homedir(os.path.dirname(view_file_name)), os.path.basename(view_file_name))
+			return (abbr_homedir(ensure_path_sep_at_end(os.path.dirname(view_file_name))), os.path.basename(view_file_name))
 
 		view_name = self.view.name()
 		if view_name is not None and view_name:
