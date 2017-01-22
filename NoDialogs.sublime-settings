@@ -9,6 +9,9 @@
 	// The filename used for untitled files
 	"no_dialogs_untitled_file_name": "untitled",
 
+	// Default location to save files to if no folder is open in the project
+	"no_dialogs_default_save_folder": "~",
+
 	// Should existing files be overwritten by default
 	// Nn - no; anything else - yes
 	"no_dialogs_overwrite_by_default": "y",

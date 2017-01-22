@@ -462,7 +462,7 @@ class NoDialogsCreateSavePromptCommand(sublime_plugin.ApplicationCommand):
 	# Subroutines
 	def probable_dirname_and_basename(self):
 		basename = ''
-		dirname = HOMEDIR
+		dirname = ensure_path_sep_at_end(expand_homedir(settings.get('no_dialogs_default_save_folder')))
 
 		view_name = self.view.name()
 		if view_name is not None and view_name:
